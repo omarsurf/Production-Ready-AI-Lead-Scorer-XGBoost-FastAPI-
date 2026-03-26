@@ -1,0 +1,11 @@
+.DS_Store
+.claude/
+.Rhistory
+.pytest_cache/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+outputs/*.csv
+outputs/*.json
+outputs/*.joblib

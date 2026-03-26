@@ -1,0 +1,36 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-lead-scoring:latest
+    container_name: lead-scoring-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount outputs for batch scoring results
+      - ./outputs:/app/outputs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Run batch scoring as a one-off job
+  batch-scorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-lead-scoring:latest
+    container_name: lead-scoring-batch
+    volumes:
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+    entrypoint: ["python", "-m", "src.inference"]
+    command: ["--input", "/app/data/raw/bank+marketing/bank/bank.csv", "--output", "/app/outputs/scored_leads.csv"]
+    profiles:
+      - batch  # Only run with: docker compose --profile batch run batch-scorer

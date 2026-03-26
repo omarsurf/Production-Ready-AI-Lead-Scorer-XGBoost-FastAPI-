@@ -1,5 +1,5 @@
 # AI Lead Scoring System
-![CI](https://github.com/YOUR_USERNAME/AI_LEAD_SCORE/actions/workflows/ci.yml/badge.svg) ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-Production-green)
+![CI](https://github.com/omarsurf/Production-Ready-AI-Lead-Scorer-XGBoost-FastAPI-/actions/workflows/ci.yml/badge.svg) ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-Production-green)
 
 I built a production-ready AI lead scoring system that optimizes sales outreach. Instead of aiming for pure statistical accuracy, it strictly avoids data leakage (pre-contact scoring), ranks incoming leads by conversion probability, and exposes both a batch CLI and a real-time FastAPI inference service to focus the sales effort on the most promising prospects.
 
@@ -142,8 +142,8 @@ Batch scoring needs to preserve the input rows and append new columns (`score`, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/AI_LEAD_SCORE.git
-cd AI_LEAD_SCORE
+git clone https://github.com/omarsurf/Production-Ready-AI-Lead-Scorer-XGBoost-FastAPI-.git
+cd Production-Ready-AI-Lead-Scorer-XGBoost-FastAPI-
 
 # Install local/dev dependencies via Make
 make install

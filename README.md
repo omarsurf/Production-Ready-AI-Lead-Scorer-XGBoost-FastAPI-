@@ -44,9 +44,9 @@ Instead of a simple "yes/no", the model assigns a **conversion probability** to 
 ### Artifact Flow
 | Stage | Input | Output |
 | :--- | :--- | :--- |
-| **Prepare & Train** | Raw Bank Marketing CSV (45k rows) | `tuned_xgb_pipeline.joblib` (Includes sklearn preprocessor + model) |
+| **Prepare & Train** | Raw Bank Marketing CSV (45k rows) | Legacy `.joblib` artifact + versioned registry entry with metadata and drift reference |
 | **Batch Predict** | New Leads CSV | `scored_leads.csv` (Appended with `score`, `predicted_label`, `priority_rank`) |
-| **Live API** | JSON Payload (Single/Batch) | JSON Response with probability and ranking |
+| **Live API** | JSON Payload (Single/Batch) | Single prediction or ranked batch response served from the active production model |
 
 ---
 
@@ -59,7 +59,7 @@ Instead of a simple "yes/no", the model assigns a **conversion probability** to 
 | **Batch CLI** | Appends scores and priority ranks to CSVs | Perfect for nightly lead queue generation and CRM injestion |
 | **FastAPI Service** | Real-time endpoints (`/predict`, `/predict/batch`) | Allows live webhooks to score inbound leads the moment they hit the form |
 | **Schema Discipline** | Pydantic v2 validation via API | Rejects invalid payloads with HTTP 422 before they can crash the model |
-| **Dockerized** | Multi-stage Python 3.12-slim build | Runtime image CPU-only allégée, prête à déployer |
+| **Dockerized** | Multi-stage Python 3.12-slim build | Lightweight CPU-only runtime image, ready to deploy |
 
 ---
 
@@ -91,7 +91,7 @@ File-based model registry with semantic versioning, atomic writes, and instant r
 
 ```bash
 make train        # Creates v1.0.x, auto-promotes to production
-make list-models  # Show all versions with production flag
+make list-models  # Show all versions with status + key metrics
 make promote VERSION=1.0.0   # Promote specific version
 make rollback VERSION=1.0.0  # Instant rollback
 ```
@@ -225,7 +225,7 @@ make install-runtime
 ### Run Full Pipeline
 
 ```bash
-# Train the model and generate the .joblib artifact
+# Train the model, generate metadata, drift reference, and register a new version
 make train
 
 # Run batch scoring on sample leads
@@ -255,16 +255,16 @@ curl http://localhost:8000/health
 | :--- | :--- |
 | `make train` | Train model, save to registry, generate drift reference |
 | `make tune` | Multi-metric tuning (ROC-AUC + Precision@10%) |
-| `make tune-business` | Explicit business-metric tuning |
+| `make tune-business` | Explicit alias for the business-oriented multi-metric tuning path |
 | `make score` | Batch scoring on test file |
 | `make serve` | Spin up FastAPI server locally |
-| `make test` | Run pytest suite (93+ tests) |
+| `make test` | Run the full pytest suite |
 
 ### Model Registry Commands
 
 | Command | Description |
 | :--- | :--- |
-| `make list-models` | List all registered versions with production flag |
+| `make list-models` | List all registered versions with status, ROC-AUC, and P@10 |
 | `make promote VERSION=x.y.z` | Promote version to production |
 | `make rollback VERSION=x.y.z` | Rollback to previous version |
 
@@ -316,7 +316,7 @@ AI_LEAD_SCORE/
 │       ├── metadata.json
 │       └── reference_distributions.json
 ├── notebooks/               # EDA and exploration only
-├── outputs/                 # Scored batch CSVs
+├── outputs/                 # Scored CSVs and JSON reports
 ├── src/
 │   ├── config.py            # Feature definitions & constants
 │   ├── drift.py             # PSI-based drift detection (numeric + categorical)

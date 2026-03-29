@@ -342,3 +342,5 @@ AI_LEAD_SCORE/
 ├── requirements-dev.txt     # Runtime + test dependencies
 └── requirements.txt         # Dev alias
 ```
+
+Omar PIRO - ML engineer 

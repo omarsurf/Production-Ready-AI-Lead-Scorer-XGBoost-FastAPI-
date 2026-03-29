@@ -107,3 +107,15 @@ def test_predict_batch_preserves_traceability_and_ranking():
     assert ranks == [1, 2, 3]
     assert input_indexes == {0, 1, 2}
     assert lead_ids == {"lead-low", "lead-mid", "lead-high"}
+
+
+def test_predict_batch_normalizes_integer_lead_id_to_string():
+    """Les lead_id numériques doivent être normalisés en string dans la réponse."""
+    leads = [{**SAMPLE_LEAD, "lead_id": 12345}]
+
+    with TestClient(app) as client:
+        response = client.post("/predict/batch", json={"leads": leads})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["results"][0]["lead_id"] == "12345"

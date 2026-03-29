@@ -2,8 +2,7 @@
 Schémas Pydantic pour la validation des requêtes/réponses API.
 """
 
-from typing import List, Literal, Optional
-from typing import Union
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
@@ -13,7 +12,7 @@ from src.config import ALLOWED_CATEGORICAL_VALUES
 class LeadInput(BaseModel):
     """Données d'un lead pour scoring."""
 
-    lead_id: Optional[Union[str, int]] = Field(
+    lead_id: Optional[str] = Field(
         default=None,
         description="Identifiant optionnel du lead, renvoyé dans les réponses batch",
     )
@@ -69,6 +68,14 @@ class LeadInput(BaseModel):
             )
         return value
 
+    @field_validator("lead_id", mode="before")
+    @classmethod
+    def normalize_lead_id(cls, value: Any) -> Any:
+        """Normalise lead_id en string pour simplifier la traçabilité downstream."""
+        if value is None:
+            return None
+        return str(value)
+
 
 class LeadScoreResponse(BaseModel):
     """Réponse de scoring pour un lead."""
@@ -89,10 +96,18 @@ class LeadBatchResult(LeadScoreResponse):
         ..., ge=0, description="Position d'origine du lead dans la requête"
     )
     priority_rank: int = Field(..., ge=1, description="Rang de priorité (1 = meilleur)")
-    lead_id: Optional[Union[str, int]] = Field(
+    lead_id: Optional[str] = Field(
         default=None,
         description="Identifiant métier renvoyé si fourni dans la requête",
     )
+
+    @field_validator("lead_id", mode="before")
+    @classmethod
+    def normalize_lead_id(cls, value: Any) -> Any:
+        """Garantit une sérialisation homogène du lead_id côté réponse."""
+        if value is None:
+            return None
+        return str(value)
 
 
 class LeadBatchInput(BaseModel):

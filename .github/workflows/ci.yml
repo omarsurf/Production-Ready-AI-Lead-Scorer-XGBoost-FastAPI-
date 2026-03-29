@@ -91,6 +91,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Bootstrap registry-backed production model
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          models_dir = Path("models")
+          models_dir.mkdir(parents=True, exist_ok=True)
+          (models_dir / "metadata.json").write_text("{}\n")
+
+          registry_payload = {
+              "schema_version": "1.0",
+              "production_version": "1.0.0",
+              "models": [
+                  {
+                      "version": "1.0.0",
+                      "created_at": "2026-03-29T00:00:00+00:00",
+                      "artifact_path": "models/tuned_xgb_pipeline.joblib",
+                      "metadata_path": "models/metadata.json",
+                      "reference_distributions_path": None,
+                      "metrics": {},
+                      "status": "production",
+                  }
+              ],
+          }
+
+          (models_dir / "registry.json").write_text(
+              json.dumps(registry_payload, indent=2) + "\n"
+          )
+          PY
+
       - name: Run model evaluation
         run: |
           python -m src.evaluate \

@@ -49,7 +49,7 @@ tune:
 	$(PYTHON) -m src.training --tune
 
 tune-business:
-	@echo "Tuning with multi-metric (ROC-AUC + Precision@10), refit on business metric..."
+	@echo "Alias of make tune: multi-metric tuning (ROC-AUC + Precision@10), refit on business metric..."
 	$(PYTHON) -m src.training --tune
 
 # Model registry commands

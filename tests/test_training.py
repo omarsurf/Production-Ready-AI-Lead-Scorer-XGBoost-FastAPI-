@@ -4,6 +4,7 @@ Tests pour le module d'entraînement reproductible.
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -86,3 +87,102 @@ def test_train_model_writes_strict_json_for_single_class_eval(tmp_path, monkeypa
         "ROC-AUC non defini: une seule classe est presente dans y_true."
     ]
     assert "NaN" not in metrics_output.read_text()
+
+
+def test_train_model_passes_flattened_metrics_to_registry(tmp_path, monkeypatch):
+    """L'entraînement doit transmettre des métriques aplaties au registry."""
+    X_train = pd.DataFrame({"feature": [1, 2, 3, 4]})
+    X_test = pd.DataFrame({"feature": [5, 6, 7, 8]})
+    y_train = pd.Series([0, 1, 0, 1])
+    y_test = pd.Series([0, 1, 1, 0])
+    model_output = tmp_path / "model.joblib"
+    metrics_output = tmp_path / "training_metrics.json"
+    captured_registry_call = {}
+
+    monkeypatch.setattr(
+        "src.training.load_training_frame",
+        lambda input_path: pd.DataFrame({"placeholder": [1]}),
+    )
+    monkeypatch.setattr(
+        "src.training.prepare_training_split",
+        lambda df, test_size, random_state: (X_train, X_test, y_train, y_test),
+    )
+    monkeypatch.setattr(
+        "src.training.build_pipeline",
+        lambda scale_pos_weight, classifier_params=None, random_state=42: DummyModel(
+            [0.9, 0.8, 0.2, 0.1]
+        ),
+    )
+    monkeypatch.setattr("src.training.joblib.dump", lambda model, path: None)
+    monkeypatch.setattr(
+        "src.training.save_metadata",
+        lambda metadata: tmp_path / "metadata.json",
+    )
+    monkeypatch.setattr(
+        "src.training.save_input_schema",
+        lambda: tmp_path / "input_schema.json",
+    )
+
+    def fake_register_model(**kwargs):
+        captured_registry_call.update(kwargs)
+        return SimpleNamespace(version="1.0.0")
+
+    monkeypatch.setattr("src.registry.register_model", fake_register_model)
+
+    train_model(
+        input_path=Path("ignored.csv"),
+        model_output=model_output,
+        metrics_output=metrics_output,
+        save_model_metadata=True,
+    )
+
+    assert "metrics" in captured_registry_call
+    assert "roc_auc" in captured_registry_call["metrics"]
+    assert "precision_at_10" in captured_registry_call["metrics"]
+    assert "uplift_at_10" in captured_registry_call["metrics"]
+
+
+def test_train_model_continues_when_registry_registration_fails(tmp_path, monkeypatch):
+    """Un échec du registry ne doit pas faire échouer l'entraînement."""
+    X_train = pd.DataFrame({"feature": [1, 2, 3, 4]})
+    X_test = pd.DataFrame({"feature": [5, 6, 7]})
+    y_train = pd.Series([0, 1, 0, 1])
+    y_test = pd.Series([0, 1, 1])
+    model_output = tmp_path / "model.joblib"
+
+    monkeypatch.setattr(
+        "src.training.load_training_frame",
+        lambda input_path: pd.DataFrame({"placeholder": [1]}),
+    )
+    monkeypatch.setattr(
+        "src.training.prepare_training_split",
+        lambda df, test_size, random_state: (X_train, X_test, y_train, y_test),
+    )
+    monkeypatch.setattr(
+        "src.training.build_pipeline",
+        lambda scale_pos_weight, classifier_params=None, random_state=42: DummyModel(
+            [0.8, 0.7, 0.1]
+        ),
+    )
+    monkeypatch.setattr("src.training.joblib.dump", lambda model, path: None)
+    monkeypatch.setattr(
+        "src.training.save_metadata",
+        lambda metadata: tmp_path / "metadata.json",
+    )
+    monkeypatch.setattr(
+        "src.training.save_input_schema",
+        lambda: tmp_path / "input_schema.json",
+    )
+    monkeypatch.setattr(
+        "src.registry.register_model",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("registry unavailable")),
+    )
+
+    result = train_model(
+        input_path=Path("ignored.csv"),
+        model_output=model_output,
+        save_model_metadata=True,
+    )
+
+    assert result["classification_metrics"]["roc_auc"] is not None
+    assert result["model_output"] == str(model_output)

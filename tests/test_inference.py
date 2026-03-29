@@ -16,7 +16,8 @@ import pandas as pd
 import pytest
 
 from src.config import MODEL_PATH
-from src.inference import load_model, score_leads
+import src.inference as inference_module
+from src.inference import clear_model_cache, load_model, score_leads
 from src.schema import SchemaValidationError, validate_input
 
 
@@ -42,6 +43,11 @@ SAMPLE_LEAD = {
 
 class TestModelLoading:
     """Tests de chargement du modèle."""
+
+    @pytest.fixture(autouse=True)
+    def reset_model_cache(self):
+        """Chaque test repart d'un cache vide pour des assertions déterministes."""
+        clear_model_cache()
 
     def test_model_file_exists(self):
         """Vérifie que le fichier modèle existe."""
@@ -74,6 +80,40 @@ class TestModelLoading:
 
         assert default_model is not copied_model
         assert load_model(copied_model_path) is copied_model
+
+    def test_clear_model_cache_drops_single_entry(self):
+        """Une entrée précise du cache doit pouvoir être invalidée."""
+        default_model = load_model(MODEL_PATH)
+
+        clear_model_cache(MODEL_PATH)
+        reloaded_model = load_model(MODEL_PATH)
+
+        assert default_model is not reloaded_model
+
+    def test_cache_evicts_oldest_entry_when_limit_is_reached(
+        self, tmp_path, monkeypatch
+    ):
+        """Le cache doit évincer l'entrée la plus ancienne au-delà de la limite."""
+        monkeypatch.setattr(inference_module, "MODEL_CACHE_SIZE", 2)
+
+        copied_model_paths = []
+        for index in range(3):
+            copied_model_path = tmp_path / f"model_{index}.joblib"
+            shutil.copy2(MODEL_PATH, copied_model_path)
+            copied_model_paths.append(copied_model_path)
+
+        first_model = load_model(copied_model_paths[0])
+        second_model = load_model(copied_model_paths[1])
+        assert len(inference_module._model_cache) == 2
+
+        third_model = load_model(copied_model_paths[2])
+        assert len(inference_module._model_cache) == 2
+        assert second_model is load_model(copied_model_paths[1])
+        assert third_model is load_model(copied_model_paths[2])
+        assert copied_model_paths[0].resolve() not in inference_module._model_cache
+
+        reloaded_first_model = load_model(copied_model_paths[0])
+        assert reloaded_first_model is not first_model
 
 
 class TestScoring:

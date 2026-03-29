@@ -2,14 +2,27 @@
 Tests API pour le service FastAPI.
 """
 
+import shutil
+
+import pytest
 from fastapi.testclient import TestClient
 
+import app.model_loader as model_loader_module
 from app.main import app
+from src.config import MODEL_PATH
+import src.inference as inference_module
 from tests.test_inference import SAMPLE_LEAD
 
 
-def test_health_reports_loaded_model():
-    """Le health check doit refléter un modèle chargé au démarrage."""
+@pytest.fixture(autouse=True)
+def reset_model_loader_state(monkeypatch):
+    """Réinitialise le chargeur API et le cache d'inférence entre tests."""
+    monkeypatch.setattr(model_loader_module, "_loaded_model_path", None)
+    monkeypatch.setattr(inference_module, "_model_cache", {})
+
+
+def test_health_reports_loaded_legacy_model():
+    """Le health check doit refléter le fallback legacy quand le registry est absent."""
     with TestClient(app) as client:
         response = client.get("/health")
 
@@ -18,6 +31,29 @@ def test_health_reports_loaded_model():
     assert payload["status"] == "healthy"
     assert payload["model_loaded"] is True
     assert payload["model_path"].endswith("models/tuned_xgb_pipeline.joblib")
+
+
+def test_health_reports_versioned_model_path_when_registry_is_present(
+    tmp_path, monkeypatch
+):
+    """Le health check doit exposer le vrai chemin versionné servi par l'API."""
+    versioned_model_path = tmp_path / "models" / "v1.0.2" / "model.joblib"
+    versioned_model_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(MODEL_PATH, versioned_model_path)
+
+    monkeypatch.setattr(
+        "src.registry.get_production_model_path",
+        lambda: versioned_model_path,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "healthy"
+    assert payload["model_loaded"] is True
+    assert payload["model_path"].endswith("models/v1.0.2/model.joblib")
 
 
 def test_predict_returns_score_priority_and_label():

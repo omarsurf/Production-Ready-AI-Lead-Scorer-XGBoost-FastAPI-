@@ -137,6 +137,7 @@ def test_evaluate_csv_matches_manual_model_scoring(tmp_path):
     assert payload["total_samples"] == 4521
     assert "top_10%" in payload["precision_at_k"]
     assert payload["warnings"] == []
+    assert payload["model_path"].endswith("models/tuned_xgb_pipeline.joblib")
     assert not any("duration" in str(warning.message).lower() for warning in captured)
 
 
@@ -158,3 +159,20 @@ def test_evaluate_csv_writes_null_roc_auc_for_single_class_dataset(tmp_path):
         "ROC-AUC non defini: une seule classe est presente dans y_true."
     ]
     assert "NaN" not in output_path.read_text()
+
+
+def test_evaluate_csv_reports_resolved_model_path(tmp_path, monkeypatch):
+    """Le rapport doit refléter le vrai chemin de modèle utilisé."""
+    source_path = "data/raw/bank+marketing/bank/bank.csv"
+    output_path = tmp_path / "evaluation_report.json"
+    versioned_model_path = tmp_path / "models" / "v1.0.9" / "model.joblib"
+    versioned_model_path.parent.mkdir(parents=True)
+    versioned_model_path.write_bytes(b"placeholder")
+
+    monkeypatch.setattr("src.evaluate.resolve_model_path", lambda: versioned_model_path)
+
+    report = evaluate_csv(source_path, output_path=str(output_path))
+    payload = json.loads(output_path.read_text())
+
+    assert report.model_path == str(versioned_model_path)
+    assert payload["model_path"] == str(versioned_model_path)

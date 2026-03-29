@@ -18,6 +18,7 @@ from src.config import (
     CLASSIFICATION_THRESHOLD,
     EXCLUDED_FEATURES,
     MODEL_PATH,
+    MODEL_CACHE_SIZE,
     OUTPUTS_DIR,
     PRIORITY_THRESHOLDS,
     REQUIRED_COLUMNS,
@@ -30,7 +31,30 @@ _model_cache: Dict[Path, Any] = {}
 
 def _normalize_model_path(model_path: Optional[Path] = None) -> Path:
     """Normalise le chemin du modèle pour une utilisation sûre dans le cache."""
-    return Path(model_path or MODEL_PATH).expanduser().resolve()
+    if model_path is not None:
+        return Path(model_path).expanduser().resolve()
+
+    # Try registry first, fallback to legacy MODEL_PATH
+    try:
+        from src.registry import get_production_model_path
+
+        return get_production_model_path()
+    except (ImportError, FileNotFoundError):
+        return MODEL_PATH.expanduser().resolve()
+
+
+def resolve_model_path(model_path: Optional[Path] = None) -> Path:
+    """Expose la résolution du modèle actif pour les workflows batch/reporting."""
+    return _normalize_model_path(model_path)
+
+
+def clear_model_cache(model_path: Optional[Path] = None) -> None:
+    """Vide tout le cache ou une seule entrée si un chemin est fourni."""
+    if model_path is None:
+        _model_cache.clear()
+        return
+
+    _model_cache.pop(_normalize_model_path(model_path), None)
 
 
 def load_model(model_path: Optional[Path] = None):
@@ -49,6 +73,9 @@ def load_model(model_path: Optional[Path] = None):
 
     if path in _model_cache:
         return _model_cache[path]
+
+    if len(_model_cache) >= MODEL_CACHE_SIZE:
+        _model_cache.pop(next(iter(_model_cache)))
 
     _model_cache[path] = joblib.load(path)
     return _model_cache[path]
@@ -164,7 +191,57 @@ def main():
         default=str(OUTPUTS_DIR / "scored_leads.csv"),
         help="Chemin vers le CSV de sortie",
     )
+    parser.add_argument(
+        "--check-drift",
+        action="store_true",
+        help="Check for data drift before scoring (batch only)",
+    )
+    parser.add_argument(
+        "--drift-report",
+        help="Path to save drift report JSON (requires --check-drift)",
+    )
     args = parser.parse_args()
+
+    # Check drift if requested
+    if args.check_drift:
+        try:
+            from src.drift import detect_drift, resolve_reference_path
+
+            # Load input data
+            input_path = Path(args.input)
+            with open(input_path) as f:
+                first_line = f.readline()
+            sep = ";" if ";" in first_line else ","
+            df = pd.read_csv(input_path, sep=sep)
+
+            resolved_reference_path, model_version = resolve_reference_path()
+            try:
+                report = detect_drift(
+                    X_current=df,
+                    reference_path=resolved_reference_path,
+                    model_version=model_version,
+                )
+
+                print(f"Drift status: {report.overall_status.upper()}")
+                if report.major_drift_features:
+                    print(f"⚠ Major drift: {', '.join(report.major_drift_features)}")
+
+                if args.drift_report:
+                    import json
+
+                    report_path = Path(args.drift_report)
+                    report_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(report_path, "w") as f:
+                        json.dump(report.to_dict(), f, indent=2)
+                    print(f"✓ Drift report: {report_path}")
+
+            except ValueError as e:
+                print(f"⚠ Drift check skipped: {e}")
+
+        except FileNotFoundError as e:
+            print(f"⚠ Drift check skipped: {e}")
+        except Exception as e:
+            print(f"⚠ Drift check failed: {e}")
 
     score_csv(args.input, args.output)
 

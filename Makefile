@@ -1,4 +1,4 @@
-.PHONY: install install-runtime test serve score train tune evaluate docker-build docker-run docker-stop clean help
+.PHONY: install install-runtime test serve score train tune tune-business list-models promote rollback drift-check evaluate docker-build docker-run docker-stop clean help
 
 # Variables
 PYTHON = python
@@ -47,6 +47,24 @@ train:
 
 tune:
 	$(PYTHON) -m src.training --tune
+
+tune-business:
+	@echo "Tuning with multi-metric (ROC-AUC + Precision@10), refit on business metric..."
+	$(PYTHON) -m src.training --tune
+
+# Model registry commands
+list-models:
+	$(PYTHON) -m src.registry list
+
+promote:
+	$(PYTHON) -m src.registry promote --version $(VERSION)
+
+rollback:
+	$(PYTHON) -m src.registry rollback --version $(VERSION)
+
+# Drift detection
+drift-check:
+	$(PYTHON) -m src.drift --input $(INPUT_FILE) --output outputs/drift_report.json
 
 evaluate:
 	$(PYTHON) -m src.evaluate --input $(INPUT_FILE) --output outputs/evaluation_report.json

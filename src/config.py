@@ -20,6 +20,7 @@ TRAINING_DATA_PATH = DATA_DIR / "raw" / "bank+marketing" / "bank" / "bank-full.c
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 CLASSIFICATION_THRESHOLD = 0.5
+MODEL_CACHE_SIZE = 4
 
 # Features numériques
 NUMERIC_FEATURES = [
@@ -125,6 +126,17 @@ XGB_TUNING_SPACE = {
     "classifier__reg_lambda": [1, 1.5, 2, 3],
 }
 TOP_K_FRACTIONS = (0.1, 0.2, 0.3, 0.5)
+
+# Multi-metric tuning configuration
+# Uses both ROC-AUC (statistical guard) and Precision@K (business objective)
+TUNING_REFIT_METRIC = "precision_at_10"  # Metric to optimize for final model selection
+PRECISION_AT_K_FRACTION = 0.1  # Top 10% for business metric
+CV_SPLITS = 3
+CV_SHUFFLE = True  # Reduce variance in top-k CV estimates
+
+# Model registry configuration
+REGISTRY_PATH = MODELS_DIR / "registry.json"
+METADATA_PATH = MODELS_DIR / "metadata.json"
 
 # Seuils de priorité pour le scoring
 PRIORITY_THRESHOLDS = {

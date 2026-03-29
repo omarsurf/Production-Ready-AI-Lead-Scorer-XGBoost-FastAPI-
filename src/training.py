@@ -15,12 +15,18 @@ import joblib
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from sklearn.model_selection import (
+    RandomizedSearchCV,
+    StratifiedKFold,
+    train_test_split,
+)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 from src.config import (
+    CV_SHUFFLE,
+    CV_SPLITS,
     EDUCATION_ORDER,
     EXCLUDED_FEATURES,
     FINAL_XGB_PARAMS,
@@ -29,13 +35,16 @@ from src.config import (
     NUMERIC_FEATURES,
     ORDINAL_FEATURES,
     OUTPUTS_DIR,
+    PRECISION_AT_K_FRACTION,
     RANDOM_STATE,
     TARGET,
     TEST_SIZE,
     TOP_K_FRACTIONS,
     TRAINING_DATA_PATH,
+    TUNING_REFIT_METRIC,
     XGB_TUNING_SPACE,
 )
+from src.metrics import get_tuning_scorers
 from src.metadata import (
     create_training_metadata,
     save_input_schema,
@@ -140,6 +149,16 @@ def precision_at_fraction(scored_frame: pd.DataFrame, fraction: float) -> float:
     return float(scored_frame.head(top_k)["y_true"].mean())
 
 
+def flatten_registry_metrics(evaluation: Dict[str, Any]) -> Dict[str, Any]:
+    """Aplatit les métriques de classification et de ranking pour le registry."""
+    registry_metrics: Dict[str, Any] = {}
+    for section_name in ("classification_metrics", "ranking_metrics"):
+        metrics_section = evaluation.get(section_name, {})
+        for metric_name, metric_value in metrics_section.items():
+            registry_metrics[metric_name] = metric_value
+    return registry_metrics
+
+
 def evaluate_model(
     model: Pipeline,
     X_test: pd.DataFrame,
@@ -215,6 +234,12 @@ def train_model(
     scale_pos_weight = float((y_train == 0).sum() / (y_train == 1).sum())
 
     if tune:
+        # Multi-metric tuning: ROC-AUC as statistical guard, Precision@K as business objective
+        scoring, refit_metric = get_tuning_scorers(PRECISION_AT_K_FRACTION)
+        cv_strategy = StratifiedKFold(
+            n_splits=CV_SPLITS, shuffle=CV_SHUFFLE, random_state=random_state
+        )
+
         search = RandomizedSearchCV(
             estimator=build_pipeline(
                 scale_pos_weight=scale_pos_weight,
@@ -222,8 +247,9 @@ def train_model(
             ),
             param_distributions=XGB_TUNING_SPACE,
             n_iter=n_iter,
-            scoring="roc_auc",
-            cv=cv,
+            scoring=scoring,
+            refit=refit_metric,
+            cv=cv_strategy,
             verbose=1,
             random_state=random_state,
             n_jobs=-1,
@@ -232,6 +258,10 @@ def train_model(
         model = search.best_estimator_
         model_params = search.best_params_
         best_cv_score = round(float(search.best_score_), 4)
+        # Also capture ROC-AUC for comparison
+        best_roc_auc = round(
+            float(search.cv_results_["mean_test_roc_auc"][search.best_index_]), 4
+        )
     else:
         model = build_pipeline(
             scale_pos_weight=scale_pos_weight,
@@ -243,6 +273,7 @@ def train_model(
             f"classifier__{key}": value for key, value in FINAL_XGB_PARAMS.items()
         }
         best_cv_score = None
+        best_roc_auc = None
 
     evaluation = evaluate_model(model, X_test, y_test)
 
@@ -258,7 +289,9 @@ def train_model(
         "train_rows": int(len(X_train)),
         "test_rows": int(len(X_test)),
         "scale_pos_weight": round(scale_pos_weight, 4),
-        "best_cv_roc_auc": best_cv_score,
+        "cv_refit_metric": TUNING_REFIT_METRIC if tune else None,
+        "best_cv_score": best_cv_score,
+        "best_cv_roc_auc": best_roc_auc,
         "model_params": model_params,
         **evaluation,
     }
@@ -287,6 +320,34 @@ def train_model(
         schema_path = save_input_schema()
         print(f"✓ Métadonnées sauvegardées: {metadata_path}")
         print(f"✓ Schéma sauvegardé: {schema_path}")
+
+        # Save reference distributions for drift detection
+        ref_dist_path = None
+        try:
+            from src.drift import save_reference_distributions
+
+            ref_dist_path = model_output.parent / "reference_distributions.json"
+            save_reference_distributions(X_train, ref_dist_path)
+            print(f"✓ Distributions de référence: {ref_dist_path}")
+        except Exception as e:
+            print(f"⚠ Échec sauvegarde distributions: {e}")
+
+        # Register model in registry
+        try:
+            from src.registry import register_model
+
+            registry_metrics = flatten_registry_metrics(evaluation)
+            entry = register_model(
+                model_path=model_output,
+                metadata_path=metadata_path,
+                reference_distributions_path=ref_dist_path,
+                metrics=registry_metrics,
+                set_as_production=True,
+            )
+            print(f"✓ Modèle enregistré: v{entry.version} (production)")
+        except Exception as e:
+            # Don't fail training if registry fails
+            print(f"⚠ Échec enregistrement registry: {e}")
 
     return result
 

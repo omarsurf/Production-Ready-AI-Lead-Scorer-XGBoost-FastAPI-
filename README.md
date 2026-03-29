@@ -9,6 +9,7 @@ I built a production-ready AI lead scoring system that optimizes sales outreach.
 - [Problem Statement](#problem-statement)
 - [Architecture](#architecture)
 - [Key Features](#key-features)
+- [Production ML Features](#production-ml-features)
 - [Challenges Solved](#challenges-solved)
 - [Built By Me](#built-by-me)
 - [Production Mindset](#production-mindset)
@@ -59,6 +60,73 @@ Instead of a simple "yes/no", the model assigns a **conversion probability** to 
 | **FastAPI Service** | Real-time endpoints (`/predict`, `/predict/batch`) | Allows live webhooks to score inbound leads the moment they hit the form |
 | **Schema Discipline** | Pydantic v2 validation via API | Rejects invalid payloads with HTTP 422 before they can crash the model |
 | **Dockerized** | Multi-stage Python 3.12-slim build | Runtime image CPU-only allégée, prête à déployer |
+
+---
+
+## Production ML Features
+
+Beyond basic model training, this project implements three production-grade ML capabilities:
+
+### 1. Business-Aligned Hyperparameter Tuning
+
+Standard ML tuning optimizes for ROC-AUC across all predictions. But sales teams only contact the **top 10-20% of leads**—so we optimize for what matters:
+
+```python
+# Multi-metric tuning with business objective
+scoring = {
+    "roc_auc": "roc_auc",              # Statistical guard
+    "precision_at_10": precision_at_k_scorer  # Business metric
+}
+search = RandomizedSearchCV(..., scoring=scoring, refit="precision_at_10")
+```
+
+| Metric | Purpose |
+|--------|---------|
+| `roc_auc` | Statistical validity check |
+| `precision_at_10` | **Primary objective** - conversion rate in top 10% |
+
+### 2. Model Versioning & Registry
+
+File-based model registry with semantic versioning, atomic writes, and instant rollback:
+
+```bash
+make train        # Creates v1.0.x, auto-promotes to production
+make list-models  # Show all versions with production flag
+make promote VERSION=1.0.0   # Promote specific version
+make rollback VERSION=1.0.0  # Instant rollback
+```
+
+**Structure:**
+```
+models/
+  registry.json           # Central index (source of truth)
+  v1.0.0/
+    model.joblib
+    metadata.json
+    reference_distributions.json  # For drift detection
+  v1.0.1/
+    ...
+```
+
+### 3. Data Drift Detection (PSI)
+
+Population Stability Index (PSI) monitoring compares training vs. inference distributions:
+
+```bash
+make drift-check INPUT_FILE=data/new_leads.csv
+```
+
+| PSI Score | Interpretation |
+|-----------|----------------|
+| < 0.1 | No drift (healthy) |
+| 0.1 - 0.25 | Minor drift (warning) |
+| ≥ 0.25 | Major drift (action required) |
+
+**Features:**
+- Separate handling for numeric (binning) and categorical (proportions) features
+- Missing values tracked as dedicated bucket
+- Minimum sample size enforcement (100+) to avoid false positives
+- Batch-only (not real-time API) to ensure statistical significance
 
 ---
 
@@ -185,12 +253,27 @@ curl http://localhost:8000/health
 
 | Command | Description |
 | :--- | :--- |
-| `make train` | Reproducibly train the model pipeline and artifact |
-| `make tune` | Run hyperparameter tuning for XGBoost |
-| `make score` | Run the CLI batch scoring script on a test file |
-| `make serve` | Spin up the FastAPI server locally |
-| `make install-runtime` | Install only runtime dependencies |
-| `make test` | Run the pytest suite |
+| `make train` | Train model, save to registry, generate drift reference |
+| `make tune` | Multi-metric tuning (ROC-AUC + Precision@10%) |
+| `make tune-business` | Explicit business-metric tuning |
+| `make score` | Batch scoring on test file |
+| `make serve` | Spin up FastAPI server locally |
+| `make test` | Run pytest suite (93+ tests) |
+
+### Model Registry Commands
+
+| Command | Description |
+| :--- | :--- |
+| `make list-models` | List all registered versions with production flag |
+| `make promote VERSION=x.y.z` | Promote version to production |
+| `make rollback VERSION=x.y.z` | Rollback to previous version |
+
+### Drift Detection Commands
+
+| Command | Description |
+| :--- | :--- |
+| `make drift-check` | Run PSI drift analysis on default input file |
+| `python -m src.drift -i data.csv -o report.json` | Custom drift check with report output |
 
 ### FastAPI Endpoints
 
@@ -226,20 +309,31 @@ AI_LEAD_SCORE/
 │   └── model_loader.py      # Artifact loading logic
 ├── data/                    # UCI Bank dataset
 ├── models/
-│   └── tuned_xgb_pipeline.joblib # Production artifact
+│   ├── registry.json        # Model version registry
+│   ├── tuned_xgb_pipeline.joblib # Legacy artifact (backward compat)
+│   └── v1.0.x/              # Versioned model directories
+│       ├── model.joblib
+│       ├── metadata.json
+│       └── reference_distributions.json
 ├── notebooks/               # EDA and exploration only
 ├── outputs/                 # Scored batch CSVs
 ├── src/
 │   ├── config.py            # Feature definitions & constants
+│   ├── drift.py             # PSI-based drift detection (numeric + categorical)
 │   ├── evaluate.py          # Business evaluation metrics and reporting
-│   ├── schema.py            # Data validation helpers
 │   ├── inference.py         # Batch scoring logic
 │   ├── metadata.py          # Model metadata + schema persistence
+│   ├── metrics.py           # Precision@K scorer for business-aligned tuning
+│   ├── registry.py          # File-based model versioning & registry
+│   ├── schema.py            # Data validation helpers
 │   └── training.py          # ML pipeline construction
 ├── tests/
 │   ├── test_api.py          # API contract tests
+│   ├── test_drift.py        # PSI drift detection tests
 │   ├── test_evaluate.py     # Evaluation/report tests
 │   ├── test_inference.py    # Batch logic tests
+│   ├── test_metrics.py      # Precision@K scorer tests
+│   ├── test_registry.py     # Model versioning tests
 │   └── test_training.py     # Training/report serialization tests
 ├── Dockerfile               # Multi-stage production image
 ├── docker-compose.yml       # Local deployment stack

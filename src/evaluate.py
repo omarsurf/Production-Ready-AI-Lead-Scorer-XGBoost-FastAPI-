@@ -36,7 +36,7 @@ from src.config import (
     TARGET,
     TOP_K_FRACTIONS,
 )
-from src.inference import load_model
+from src.inference import load_model, resolve_model_path
 from src.schema import validate_input
 
 
@@ -108,6 +108,7 @@ def evaluate_model(
     y_true: np.ndarray,
     y_scores: np.ndarray,
     k_fractions: Tuple[float, ...] = TOP_K_FRACTIONS,
+    model_path: Optional[Path] = None,
 ) -> EvaluationReport:
     """
     Évalue un modèle avec métriques classiques et business.
@@ -173,7 +174,7 @@ def evaluate_model(
         cumulative_gain=cumulative_gain,
         total_samples=len(y_true),
         total_conversions=total_conversions,
-        model_path=str(MODEL_PATH),
+        model_path=str(model_path or MODEL_PATH),
         warnings=metric_warnings,
     )
 
@@ -222,7 +223,7 @@ def evaluate_csv(
     y_scores = model.predict_proba(X)[:, 1]
 
     # Évaluer
-    report = evaluate_model(y_true, y_scores)
+    report = evaluate_model(y_true, y_scores, model_path=resolve_model_path())
 
     # Sauvegarder si demandé
     if output_path:
